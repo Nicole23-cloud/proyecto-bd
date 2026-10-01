@@ -744,39 +744,3 @@ INSERT INTO VENTA.CONTACTO_CLIENTE (ID_CONTACTO, RUC, NOMBRE, APELLIDO, CARGO, T
 (38, '20100123488', 'Isabel', 'Pacheco', 'Jefa de Comercio Exterior', '987654338', 'ipacheco@frutasexport.pe'),
 (39, '20100123489', 'César', 'Salazar', 'Técnico de Servicio', '987654339', 'csalazar@refricomercial.pe'),
 (40, '20100123490', 'Adriana', 'Guzmán', 'Jefa de Proyectos', '987654340', 'aguzman@promontajes.pe');
-
-
--- =========================================================
--- DIMENSION ALMACEN
--- =========================================================
-
-CREATE TABLE DIM_ALMACEN (
-    SK_ALMACEN INT IDENTITY(1,1) PRIMARY KEY,
-    ID_FORMULA INT,
-    ID_PRODUCTO INT,
-    CANTIDAD_TIPOUNIDAD INT,
-    TIPO_UNIDAD VARCHAR(30),
-    UNIDADES INT,
-    OBSERVACIONES VARCHAR(20)
-);
-GO
-
--- CARGA DE DIM_ALMACEN-----
-
-INSERT INTO DIM_ALMACEN (
-    ID_FORMULA,
-    ID_PRODUCTO,
-    CANTIDAD_TIPOUNIDAD,
-    TIPO_UNIDAD,
-    UNIDADES,
-    OBSERVACIONES
-)
-SELECT
-    ID_FORMULA,
-    ID_PRODUCTO,
-    CANTIDAD_TIPOUNIDAD,
-    TIPO_UNIDAD,
-    UNIDADES,
-    OBSERVACIONES
-FROM LOGISTICA.ALMACEN;
-GO
