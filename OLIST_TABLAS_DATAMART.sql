@@ -1,153 +1,136 @@
 
 
-create table dim_producto (
-    id_producto int primary key identity(1,1),
-    product_id nvarchar(50),
-    categoria_original nvarchar(100),
-    categoria_ingles nvarchar(100),
-    peso_g int,
-    largo_cm int,
-    alto_cm int,
-    ancho_cm int
+USE DATAMARTT_OLIST;
+GO
+
+SET NOCOUNT ON;
+GO
+
+/* =========================================================
+   1. DIMENSION DE PRODUCTOS
+   ========================================================= */
+
+CREATE TABLE dbo.dim_producto (
+    id_producto INT IDENTITY(1,1) PRIMARY KEY,
+    product_id NVARCHAR(50) NOT NULL UNIQUE,
+    categoria_original NVARCHAR(100),
+    categoria_ingles NVARCHAR(100),
+    peso_g INT,
+    largo_cm INT,
+    alto_cm INT,
+    ancho_cm INT
 );
+GO
 
-create table dim_cliente (
-    id_cliente int primary key identity(1,1),
-    customer_id nvarchar(50),
-    customer_unique_id nvarchar(50),
-    codigo_postal int,
-    ciudad nvarchar(100),
-    estado char(2)
+
+/* =========================================================
+   2. DIMENSION DE CLIENTES
+   ========================================================= */
+
+CREATE TABLE dbo.dim_cliente (
+    id_cliente INT IDENTITY(1,1) PRIMARY KEY,
+    customer_id NVARCHAR(50) NOT NULL UNIQUE,
+    customer_unique_id NVARCHAR(50),
+    nombre_cliente NVARCHAR(200),
+    codigo_postal INT,
+    ciudad NVARCHAR(100),
+    estado CHAR(2)
 );
+GO
 
-create table dim_vendedor (
-    id_vendedor int primary key identity(1,1),
-    seller_id nvarchar(50),
-    codigo_postal int,
-    ciudad nvarchar(100),
-    estado char(2)
+
+/* =========================================================
+   3. DIMENSION DE VENDEDORES
+   ========================================================= */
+
+CREATE TABLE dbo.dim_vendedor (
+    id_vendedor INT IDENTITY(1,1) PRIMARY KEY,
+    seller_id NVARCHAR(50) NOT NULL UNIQUE,
+    nombre_vendedor NVARCHAR(200),
+    codigo_postal INT,
+    ciudad NVARCHAR(100),
+    estado CHAR(2)
 );
+GO
 
-create table dim_tiempo (
-    id_tiempo int primary key,
-    fecha date,
-    dia int,
-    mes int,
-    trimestre int,
-    anio int
+
+/* =========================================================
+   4. DIMENSION DE TIEMPO
+   ========================================================= */
+
+CREATE TABLE dbo.dim_tiempo (
+    id_tiempo INT PRIMARY KEY,
+    fecha DATE NOT NULL UNIQUE,
+    dia INT,
+    mes INT,
+    trimestre INT,
+    anio INT
 );
+GO
 
-create table dim_estado_pedido (
-    id_estado int primary key identity(1,1),
-    estado_pedido nvarchar(30)
+
+/* =========================================================
+   5. DIMENSION DE ESTADOS DE PEDIDO
+   ========================================================= */
+
+CREATE TABLE dbo.dim_estado_pedido (
+    id_estado INT IDENTITY(1,1) PRIMARY KEY,
+    estado_pedido NVARCHAR(30) NOT NULL UNIQUE
 );
+GO
 
 
-create table fact_ventas (
-    id_hecho int primary key identity(1,1),
-    id_pedido nvarchar(50) not null,
-    numero_item int not null,
-    id_producto int not null,
-    id_vendedor int not null,
-    id_cliente int not null,
-    id_tiempo int not null,
-    id_estado int not null,
-    precio decimal(12,2) not null,
-    flete decimal(12,2) not null,
-    cantidad_articulos int not null,
+/* =========================================================
+   6. TABLA DE HECHOS DE VENTAS
+   ========================================================= */
 
-    foreign key (id_producto)
-        references dim_producto(id_producto),
+CREATE TABLE dbo.fact_ventas (
+    id_hecho INT IDENTITY(1,1) PRIMARY KEY,
 
-    foreign key (id_vendedor)
-        references dim_vendedor(id_vendedor),
+    id_pedido NVARCHAR(50) NOT NULL,
+    numero_item INT NOT NULL,
 
-    foreign key (id_cliente)
-        references dim_cliente(id_cliente),
+    id_producto INT NOT NULL,
+    id_vendedor INT NOT NULL,
+    id_cliente INT NOT NULL,
+    id_tiempo INT NOT NULL,
+    id_estado INT NOT NULL,
 
-    foreign key (id_tiempo)
-        references dim_tiempo(id_tiempo),
+    precio DECIMAL(12,2) NOT NULL,
+    flete DECIMAL(12,2) NOT NULL,
+    cantidad_articulos INT NOT NULL,
 
-    foreign key (id_estado)
-        references dim_estado_pedido(id_estado)
+    CONSTRAINT uq_fact_ventas_pedido_item
+        UNIQUE (id_pedido, numero_item),
+
+    CONSTRAINT fk_fact_producto
+        FOREIGN KEY (id_producto)
+        REFERENCES dbo.dim_producto(id_producto),
+
+    CONSTRAINT fk_fact_vendedor
+        FOREIGN KEY (id_vendedor)
+        REFERENCES dbo.dim_vendedor(id_vendedor),
+
+    CONSTRAINT fk_fact_cliente
+        FOREIGN KEY (id_cliente)
+        REFERENCES dbo.dim_cliente(id_cliente),
+
+    CONSTRAINT fk_fact_tiempo
+        FOREIGN KEY (id_tiempo)
+        REFERENCES dbo.dim_tiempo(id_tiempo),
+
+    CONSTRAINT fk_fact_estado
+        FOREIGN KEY (id_estado)
+        REFERENCES dbo.dim_estado_pedido(id_estado),
+
+    CONSTRAINT ck_fact_precio
+        CHECK (precio >= 0),
+
+    CONSTRAINT ck_fact_flete
+        CHECK (flete >= 0),
+
+    CONSTRAINT ck_fact_cantidad
+        CHECK (cantidad_articulos > 0)
 );
-----------------------------------
-
-select
-    row_number() over (order by newid()) as numero,
-    n.nombre,
-    a.apellido as apellido1,
-    b.apellido as apellido2
-into #combinaciones
-from (values
-    ('Ana'), ('Maria'), ('Joao'), ('Lucas'), ('Julia'),
-    ('Pedro'), ('Beatriz'), ('Gabriel'), ('Laura'), ('Rafael'),
-    ('Mariana'), ('Bruno'), ('Camila'), ('Felipe'), ('Larissa'),
-    ('Matheus'), ('Isabela'), ('Thiago'), ('Amanda'), ('Gustavo'),
-    ('Leticia'), ('Daniel'), ('Fernanda'), ('Rodrigo'), ('Carolina'),
-    ('Eduardo'), ('Bianca'), ('Leonardo'), ('Patricia'), ('Vinicius'),
-    ('Marcos'), ('Renata'), ('Andre'), ('Claudia'), ('Diego'),
-    ('Sofia'), ('Henrique'), ('Natalia'), ('Caio'), ('Luiza'),
-    ('Ricardo'), ('Vanessa'), ('Alexandre'), ('Tatiane'), ('Fabio'),
-    ('Priscila'), ('Roberto'), ('Aline'), ('Samuel'), ('Isadora')
-) n(nombre)
-cross join (values
-    ('Silva'), ('Santos'), ('Oliveira'), ('Souza'), ('Pereira'),
-    ('Costa'), ('Rodrigues'), ('Almeida'), ('Nascimento'), ('Lima'),
-    ('Araujo'), ('Fernandes'), ('Carvalho'), ('Gomes'), ('Martins'),
-    ('Rocha'), ('Ribeiro'), ('Alves'), ('Monteiro'), ('Mendes'),
-    ('Barbosa'), ('Cardoso'), ('Correia'), ('Dias'), ('Castro'),
-    ('Teixeira'), ('Moreira'), ('Nunes'), ('Marques'), ('Machado'),
-    ('Freitas'), ('Batista'), ('Moura'), ('Campos'), ('Ramos'),
-    ('Cavalcanti'), ('Azevedo'), ('Pinto'), ('Lopes'), ('Miranda'),
-    ('Barros'), ('Melo'), ('Farias'), ('Reis'), ('Duarte'),
-    ('Tavares'), ('Cunha'), ('Peixoto'), ('Rezende'), ('Borges')
-) a(apellido)
-cross join (values
-    ('Silva'), ('Santos'), ('Oliveira'), ('Souza'), ('Pereira'),
-    ('Costa'), ('Rodrigues'), ('Almeida'), ('Nascimento'), ('Lima'),
-    ('Araujo'), ('Fernandes'), ('Carvalho'), ('Gomes'), ('Martins'),
-    ('Rocha'), ('Ribeiro'), ('Alves'), ('Monteiro'), ('Mendes'),
-    ('Barbosa'), ('Cardoso'), ('Correia'), ('Dias'), ('Castro'),
-    ('Teixeira'), ('Moreira'), ('Nunes'), ('Marques'), ('Machado'),
-    ('Freitas'), ('Batista'), ('Moura'), ('Campos'), ('Ramos'),
-    ('Cavalcanti'), ('Azevedo'), ('Pinto'), ('Lopes'), ('Miranda'),
-    ('Barros'), ('Melo'), ('Farias'), ('Reis'), ('Duarte'),
-    ('Tavares'), ('Cunha'), ('Peixoto'), ('Rezende'), ('Borges')
-) b(apellido);
-
--- asignar nombres a todos los clientes
-with lista_clientes as (
-    select
-        customer_id,
-        row_number() over (order by newid()) as numero
-    from dbo.dim_cliente
-)
-update d
-set nombre_cliente =
-    c.nombre + ' ' + c.apellido1 + ' ' + c.apellido2
-from dbo.dim_cliente d
-join lista_clientes l
-    on d.customer_id = l.customer_id
-join #combinaciones c
-    on c.numero = l.numero;
-
--- asignar nombres a todos los vendedores
-with lista_vendedores as (
-    select
-        seller_id,
-        row_number() over (order by newid()) as numero
-    from dbo.dim_vendedor
-)
-update d
-set nombre_vendedor =
-    c.nombre + ' ' + c.apellido1 + ' ' + c.apellido2
-from dbo.dim_vendedor d
-join lista_vendedores l
-    on d.seller_id = l.seller_id
-join #combinaciones c
-    on c.numero = l.numero;
-
-drop table #combinaciones;
-go
+GO
 
