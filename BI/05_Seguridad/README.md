@@ -1,4 +1,4 @@
-# Backup y Seguridad - OLIST
+# Seguridad - OLIST
 
 Esta carpeta contiene los archivos de respaldo y seguridad del proyecto Business Intelligence.
 
