@@ -56,8 +56,6 @@ Evalúan el comportamiento del DataMart durante la ejecución de consultas, cons
 - Consultas ejecutadas sin errores.
 - Tiempos de respuesta registrados y documentados.
 
-## 7. Evidencias
 
-Los resultados de las pruebas se documentan mediante capturas de pantalla de las consultas ejecutadas en SQL Server Management Studio y los registros de rendimiento obtenidos.
 
 
