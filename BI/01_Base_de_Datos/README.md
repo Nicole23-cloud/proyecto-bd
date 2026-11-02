@@ -38,7 +38,7 @@ El DataMart utiliza un modelo dimensional compuesto por tablas de dimensiones y 
 
 ### Tabla de hechos
 
-- `fact_ventas`: almacena los registros de ventas y las métricas necesarias para el análisis comercial.
+- `fact_ventas`: Almacena los registros de ventas y las métricas necesarias para el análisis comercial.
 
 ## 6. Proceso de implementación
 
