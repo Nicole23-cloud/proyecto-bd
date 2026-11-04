@@ -46,7 +46,7 @@ Evalúan el comportamiento del DataMart durante la ejecución de consultas, cons
 4. Registrar los resultados obtenidos y verificar los criterios de validación.
 5. Ejecutar el script `exp-olist-benchmark.sql`.
 6. Registrar los tiempos de respuesta obtenidos.
-7. Documentar los resultados y adjuntar las evidencias correspondientes.
+
 
 ## 6. Resultados esperados
 
