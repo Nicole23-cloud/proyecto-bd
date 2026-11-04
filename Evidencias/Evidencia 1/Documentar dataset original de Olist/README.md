@@ -6,7 +6,7 @@ Esta carpeta contiene los archivos originales del conjunto de datos OLIST, utili
 
 ## 2. Contenido
 
-Se incluyen los datasets correspondientes a clientes, vendedores, productos, pedidos, pagos, reseñas, ubicaciones geográficas y detalles de pedidos.
+Se incluyen los Datasets correspondientes a clientes, vendedores, productos, pedidos, pagos, reseñas, ubicaciones geográficas y detalles de pedidos.
 
 ## 3. Objetivo
 
