@@ -13,7 +13,7 @@ Se incluyen los siguientes archivos:
 - **PERFILADO DE CALIDAD Y CONSISTENCIA.sql:** Script SQL para realizar el perfilado de datos, conteo de registros y detección de valores nulos.
 - **PERFILADO DE CALIDAD Y CONSISTENCIA.png:** Captura de pantalla de los resultados obtenidos durante las pruebas de calidad y consistencia.
 
-## 3. Objetivo
+## 3. Objetivo:
 
 Verificar la calidad y consistencia de los datos originales de Olist mediante consultas SQL que permitan identificar posibles inconsistencias, valores nulos y errores en los campos cuantitativos.
 
