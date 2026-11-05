@@ -1,0 +1,30 @@
+# Evidencia 5 - Seguridad y Control de Acceso de Olist
+
+## 1. Descripción
+
+Esta evidencia contiene los scripts SQL y capturas de pantalla utilizados para implementar y verificar los mecanismos de seguridad y control de acceso en la base de datos OLIST_DATAMART, garantizando la protección e integridad de la información.
+
+## 2. Contenido
+
+Se incluyen los siguientes archivos:
+
+- **E-05.sql:** Script SQL para crear los roles de seguridad y asignar permisos de acceso a la base de datos.
+- **E-05.png:** Captura de pantalla de la ejecución del script y los resultados de la verificación de permisos.
+- **OLIST_TABLAS_DATAMART (corregido).sql:** Script SQL para la creación de las dimensiones, tabla de hechos y tablas de auditoría, errores y métricas del DataMart Olist.
+
+## 3. Objetivo
+
+Implementar mecanismos de seguridad mediante roles y permisos que permitan controlar el acceso a la información del DataMart Olist, diferenciando las operaciones permitidas para usuarios de lectura y usuarios encargados de la carga de datos.
+
+## 4. Resultados obtenidos
+
+Se implementaron los siguientes roles de seguridad:
+
+- **rol_olist_lectura:** Permite consultar información mediante SELECT, restringiendo las operaciones de inserción, actualización y eliminación.
+- **rol_olist_carga:** Permite consultar, insertar y actualizar información, restringiendo la eliminación de registros.
+
+Asimismo, se verificaron los permisos asignados mediante las vistas del sistema de SQL Server.
+
+## 5. Uso en el proyecto
+
+La implementación de roles y permisos contribuye a proteger la información del DataMart Olist, mantener la integridad de los datos y establecer un acceso controlado según las responsabilidades de los usuarios.
