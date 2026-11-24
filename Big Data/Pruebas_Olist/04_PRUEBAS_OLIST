@@ -1,0 +1,691 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
+# MAGIC %md
+# MAGIC # 04_PRUEBAS_OLIST
+# MAGIC Pruebas **unitarias, integración, calidad de datos, seguridad y aceptación** del pipeline Bronze → Silver → Gold.
+# MAGIC
+# MAGIC Cada prueba queda ligada a un **requisito**, guarda su **resultado** (PASS / FAIL / ERROR / OMITIDA) y su **evidencia**
+# MAGIC en `workspace.olist_qa.resultados`. Al final se genera la matriz de trazabilidad.
+# MAGIC
+# MAGIC **Orden de ejecución:** 01_BRONZE → 02_SILVER → 03_GOLD → este notebook (Run all).
+
+# COMMAND ----------
+
+# ============================================
+# 0. CONFIGURACIÓN
+# ============================================
+from datetime import datetime
+from pyspark.sql import functions as F
+from pyspark.sql.functions import (
+    col, trim, lower, upper, to_timestamp, when, lit, array,
+    element_at, pmod, xxhash64, concat_ws
+)
+
+CAT      = "workspace"
+ESQ      = "olist_nuevo"      # bronze_*, silver_*, gold_ventas
+ESQ_KPI  = "default"          # gold_kpi_* (así los crea 03_GOLD_OLIST)
+ESQ_QA   = "olist_qa"         # resultados y evidencias de las pruebas
+RUTA_CSV = "/Volumes/workspace/olist_nuevo/olist/Archivos.csv/Olist_CSV"
+
+FECHA_MIN, FECHA_MAX = "2016-09-01", "2018-12-31"   # rango esperado de compras Olist
+UMBRAL_PERDIDA_PCT   = 5.0   # % de ingresos que el negocio acepta perder por falta de categoría 
+TOL = 0.01
+
+UF_VALIDAS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA",
+              "PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"]
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CAT}.{ESQ_QA}")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {CAT}.{ESQ_QA}.evidencias")
+RUTA_EVID = f"/Volumes/{CAT}/{ESQ_QA}/evidencias"
+RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
+USUARIO = spark.sql("select current_user()").first()[0]
+
+T = lambda n: f"{CAT}.{ESQ}.{n}"
+K = lambda n: f"{CAT}.{ESQ_KPI}.{n}"
+val = lambda sql: spark.sql(sql).first()[0]
+
+print("RUN_ID:", RUN_ID, "| usuario:", USUARIO)
+
+# COMMAND ----------
+
+# ============================================
+# 1. REQUISITOS 
+# ============================================
+REQUISITOS = [
+ ("RF-01","Funcional","Bronze reproduce fielmente los 6 CSV de origen (mismo número de filas)","01_BRONZE"),
+ ("RF-02","Funcional","Silver clientes: único por customer_id; claves no nulas ni vacías","02_SILVER §1"),
+ ("RF-03","Funcional","Silver pedidos: solo 'delivered', único por order_id, fecha de compra válida","02_SILVER §2"),
+ ("RF-04","Funcional","Silver detalles: PK (order_id, order_item_id); price y freight >= 0; solo pedidos entregados","02_SILVER §3"),
+ ("RF-05","Funcional","Silver productos/categorías: únicos; dimensiones >= 0 o nulas; categoría vacía = NULL","02_SILVER §4,6"),
+ ("RF-06","Funcional","Estandarización: ciudad en minúsculas, estado en mayúsculas","02_SILVER §1,5"),
+ ("RF-07","Funcional","Seudonimización determinista de nombres de clientes y vendedores","02_SILVER nombres"),
+ ("RF-08","Funcional","gold_ventas: un registro por ítem vendido con cliente, producto, categoría y vendedor","03_GOLD gold_ventas"),
+ ("RF-09","Funcional","KPI-01 Ingresos totales","03_GOLD KPI 01"),
+ ("RF-10","Funcional","KPI-02/03 Top 10 vendedores y top 10 categorías por ingresos","03_GOLD KPI 02,03"),
+ ("RF-11","Funcional","KPI-04/05 Evolución y variación mensual de ingresos","03_GOLD KPI 04,05"),
+ ("RF-12","Funcional","KPI-06 Distribución geográfica de ingresos por estado","03_GOLD KPI 06"),
+ ("RF-13","Funcional","KPI-07/08/09 Totales de vendedores, pedidos entregados y artículos vendidos","03_GOLD KPI 07-09"),
+ ("RNF-01","No funcional","Integridad referencial entre tablas Silver","Calidad de datos"),
+ ("RNF-02","No funcional","Completitud de campos obligatorios","Calidad de datos"),
+ ("RNF-03","No funcional","Validez de dominios (UF, rangos de fecha y de valores)","Calidad de datos"),
+ ("RNF-04","No funcional","Coherencia y trazabilidad de conteos entre capas","Integración"),
+ ("RNF-05","No funcional","Control de acceso (Unity Catalog) sobre datos y volumen de origen","Seguridad"),
+ ("RNF-06","No funcional","Protección de datos personales (sin PII real en Silver/Gold)","Seguridad"),
+ ("RNF-07","No funcional","Auditabilidad de accesos","Seguridad"),
+ ("RNF-08","No funcional","Conciliación y aprobación del negocio","Aceptación"),
+]
+(spark.createDataFrame(REQUISITOS, "id_requisito string, tipo string, descripcion string, origen string")
+      .write.mode("overwrite").saveAsTable(f"{CAT}.{ESQ_QA}.requisitos"))
+
+# COMMAND ----------
+
+# ============================================
+# 2. MOTOR DE PRUEBAS (cada @prueba se ejecuta y se registra)
+# ============================================
+RESULTADOS = []
+
+def prueba(id_prueba, tipo, req, nombre, esperado, evidencia):
+    """fn debe devolver (ok: bool|None, obtenido: str). ok=None -> OMITIDA/PENDIENTE."""
+    def deco(fn):
+        try:
+            ok, obtenido = fn()
+            res = "OMITIDA" if ok is None else ("PASS" if ok else "FAIL")
+        except Exception as e:
+            res, obtenido = "ERROR", f"{type(e).__name__}: {str(e)[:300]}"
+        RESULTADOS.append((id_prueba, tipo, req, nombre, esperado, res,
+                           str(obtenido)[:1000], evidencia, RUN_ID, USUARIO, datetime.now()))
+        print(f"[{res:7}] {id_prueba} | {req} | {nombre} -> {str(obtenido)[:150]}")
+        return fn
+    return deco
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3. Pruebas unitarias (UT)
+# MAGIC Los DataFrames de entrada son mínimos y construidos a mano. Las funciones son **copia fiel** de la lógica de `02_SILVER_OLIST`.
+# MAGIC Recomendación: mover esa lógica a funciones en un módulo `.py` e importarlo en Silver y aquí, para no mantener dos copias.
+
+# COMMAND ----------
+
+def limpiar_clientes(df):
+    return (df.dropDuplicates(["customer_id"])
+            .na.drop(subset=["customer_id", "customer_unique_id"])
+            .filter(trim(col("customer_id")) != "")
+            .filter(trim(col("customer_unique_id")) != "")
+            .withColumn("customer_city", lower(trim(col("customer_city"))))
+            .withColumn("customer_state", upper(trim(col("customer_state")))))
+
+def limpiar_pedidos(df):
+    return (df.dropDuplicates(["order_id"])
+            .na.drop(subset=["order_id", "customer_id", "order_status"])
+            .filter(trim(col("order_id")) != "")
+            .filter(trim(col("customer_id")) != "")
+            .withColumn("order_status", lower(trim(col("order_status"))))
+            .filter(col("order_status") == "delivered")
+            .withColumn("order_purchase_timestamp", to_timestamp(col("order_purchase_timestamp")))
+            .filter(col("order_purchase_timestamp").isNotNull()))
+
+def limpiar_detalles(df, df_pedidos_ok):
+    return (df.dropDuplicates(["order_id", "order_item_id"])
+            .na.drop(subset=["order_id","order_item_id","product_id","seller_id","price","freight_value"])
+            .filter(trim(col("order_id")) != "")
+            .filter(trim(col("product_id")) != "")
+            .filter(trim(col("seller_id")) != "")
+            .filter(col("order_item_id") > 0)
+            .filter(col("price") >= 0)
+            .filter(col("freight_value") >= 0)
+            .withColumn("shipping_limit_date", to_timestamp(col("shipping_limit_date")))
+            .join(df_pedidos_ok.select("order_id"), on="order_id", how="left_semi"))
+
+def limpiar_productos(df):
+    dims = ["product_weight_g","product_length_cm","product_height_cm","product_width_cm"]
+    out = df.dropDuplicates(["product_id"]).na.drop(subset=["product_id"]).filter(trim(col("product_id")) != "")
+    for d in dims:
+        out = out.filter(col(d).isNull() | (col(d) >= 0))
+    return out.withColumn("product_category_name",
+            when(trim(col("product_category_name")) == "", lit(None).cast("string"))
+            .otherwise(trim(col("product_category_name"))))
+
+def limpiar_categorias(df):
+    return (df.dropDuplicates(["product_category_name"])
+            .na.drop(subset=["product_category_name", "product_category_name_english"])
+            .filter(trim(col("product_category_name")) != "")
+            .filter(trim(col("product_category_name_english")) != "")
+            .withColumn("product_category_name", trim(col("product_category_name")))
+            .withColumn("product_category_name_english", lower(trim(col("product_category_name_english")))))
+
+def nombre_det(df, col_id, nombres, apellidos):
+    an, aa = array(*[lit(n) for n in nombres]), array(*[lit(a) for a in apellidos])
+    return df.withColumn("nombre", concat_ws(" ",
+        element_at(an, (pmod(xxhash64(col(col_id), lit("nombre")), lit(len(nombres))) + 1).cast("int")),
+        element_at(aa, (pmod(xxhash64(col(col_id), lit("apellido")), lit(len(apellidos))) + 1).cast("int"))))
+
+# COMMAND ----------
+
+@prueba("UT-01","Unitaria","RF-02","limpiar_clientes elimina duplicados, nulos y vacíos",
+        "2 filas (c1, c4)","Salida del test + código de limpiar_clientes en este notebook")
+def _():
+    df = spark.createDataFrame([("c1","u1","a","sp"),("c1","u1","a","sp"),(None,"u2","a","rj"),
+                                ("c3","  ","a","rj"),("c4","u4","a","rj")],
+        "customer_id string, customer_unique_id string, customer_city string, customer_state string")
+    ids = sorted(r[0] for r in limpiar_clientes(df).select("customer_id").collect())
+    return ids == ["c1","c4"], f"ids={ids}"
+
+@prueba("UT-02","Unitaria","RF-06","Ciudad en minúsculas y estado en mayúsculas, sin espacios",
+        "city='rio de janeiro', state='RJ'","Salida del test")
+def _():
+    df = spark.createDataFrame([("c1","u1","  Rio De Janeiro ","rj ")],
+        "customer_id string, customer_unique_id string, customer_city string, customer_state string")
+    r = limpiar_clientes(df).first()
+    return (r.customer_city, r.customer_state) == ("rio de janeiro","RJ"), f"{r.customer_city}|{r.customer_state}"
+
+@prueba("UT-03","Unitaria","RF-03","limpiar_pedidos deja solo 'delivered' únicos con fecha válida",
+        "2 filas (o1, o2)","Salida del test")
+def _():
+    df = spark.createDataFrame([
+        ("o1","c1","delivered","2017-01-01 10:00:00"),("o1","c1","delivered","2017-01-01 10:00:00"),
+        ("o2","c2"," DELIVERED ","2017-02-01 10:00:00"),("o3","c3","shipped","2017-03-01 10:00:00"),
+        ("o4","c4","delivered",None),("o5",None,"delivered","2017-04-01 10:00:00")],
+        "order_id string, customer_id string, order_status string, order_purchase_timestamp string")
+    out = limpiar_pedidos(df)
+    ids = sorted(r[0] for r in out.select("order_id").collect())
+    estados = {r[0] for r in out.select("order_status").distinct().collect()}
+    return ids == ["o1","o2"] and estados == {"delivered"}, f"ids={ids}, estados={estados}"
+
+@prueba("UT-04","Unitaria","RF-04","limpiar_detalles: filtra price/freight negativos, item<=0, duplicados y pedidos no entregados",
+        "2 filas: (o1,1) y (o1,4); price=0 se conserva","Salida del test")
+def _():
+    ts = "2017-01-05 10:00:00"
+    det = spark.createDataFrame([
+        ("o1",1,"p1","s1",ts,10.0,2.0),("o1",1,"p1","s1",ts,10.0,2.0),
+        ("o1",2,"p2","s1",ts,-1.0,2.0),("o1",3,"p3","s1",ts,5.0,-2.0),
+        ("o1",0,"p4","s1",ts,5.0,1.0),("o9",1,"p1","s1",ts,5.0,1.0),("o1",4,"p5","s1",ts,0.0,0.0)],
+        "order_id string, order_item_id int, product_id string, seller_id string, shipping_limit_date string, price double, freight_value double")
+    ok_ped = spark.createDataFrame([("o1",)], "order_id string")
+    items = sorted(r[0] for r in limpiar_detalles(det, ok_ped).select("order_item_id").collect())
+    return items == [1,4], f"order_item_id={items}"
+
+@prueba("UT-05","Unitaria","RF-05","limpiar_productos: quita dimensiones negativas, conserva nulas, categoría vacía -> NULL",
+        "p1 (categoría NULL) y p3; p2 eliminado","Salida del test")
+def _():
+    df = spark.createDataFrame([("p1",100.0,10.0,5.0,5.0,"  "),("p1",100.0,10.0,5.0,5.0,"  "),
+                                ("p2",-1.0,10.0,5.0,5.0,"x"),("p3",None,None,None,None,"beleza")],
+        "product_id string, product_weight_g double, product_length_cm double, product_height_cm double, product_width_cm double, product_category_name string")
+    out = {r.product_id: r.product_category_name for r in limpiar_productos(df).collect()}
+    return out == {"p1": None, "p3": "beleza"}, f"{out}"
+
+@prueba("UT-06","Unitaria","RF-05","limpiar_categorias: traducción en minúsculas, sin nulos ni duplicados",
+        "1 fila ('beleza_saude','health_beauty')","Salida del test")
+def _():
+    df = spark.createDataFrame([("beleza_saude","Health_Beauty"),("beleza_saude","Health_Beauty"),
+                                ("x",None),(" ","y")],
+        "product_category_name string, product_category_name_english string")
+    out = [(r[0], r[1]) for r in limpiar_categorias(df).collect()]
+    return out == [("beleza_saude","health_beauty")], f"{out}"
+
+@prueba("UT-07","Unitaria","RF-07","Seudónimo determinista: mismo id -> mismo nombre; formato 'Nombre Apellido' del catálogo",
+        "Misma salida en 2 ejecuciones y nombres del catálogo","Salida del test")
+def _():
+    nom, ape = ["Ana","Joao","Maria"], ["Silva","Costa","Lima"]
+    df = spark.createDataFrame([("u1",),("u2",),("u3",),("u1",)], "id string")
+    a = [r.nombre for r in nombre_det(df, "id", nom, ape).collect()]
+    b = [r.nombre for r in nombre_det(df, "id", nom, ape).collect()]
+    formato = all(n.split(" ")[0] in nom and n.split(" ")[1] in ape for n in a)
+    return a == b and a[0] == a[3] and formato, f"{a}"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4. Pruebas de integración (IT)
+
+# COMMAND ----------
+
+BRONZE = ["clientes","pedidos","detalles","productos","vendedores","categorias"]
+KPIS = ["gold_kpi_01_ingresos_totales","gold_kpi_02_top_vendedores","gold_kpi_03_ingresos_categoria",
+        "gold_kpi_04_evolucion_mensual","gold_kpi_05_variacion_mensual","gold_kpi_06_distribucion_geografica",
+        "gold_kpi_07_total_vendedores","gold_kpi_08_total_pedidos_entregados","gold_kpi_09_total_articulos_vendidos"]
+
+@prueba("IT-01","Integración","RF-01","Bronze: conteo de cada tabla = conteo del CSV de origen",
+        "6 de 6 iguales","Conteos CSV vs tabla en 'obtenido'")
+def _():
+    csv = {"clientes":"olist_customers_dataset","pedidos":"olist_orders_dataset","detalles":"olist_order_items_dataset",
+           "productos":"olist_products_dataset","vendedores":"olist_sellers_dataset",
+           "categorias":"olist_category_name_translation_dataset"}
+    difs = {}
+    for k, f in csv.items():
+        n_csv = spark.read.csv(f"{RUTA_CSV}/{f}.csv", header=True).count()
+        n_tab = spark.table(T(f"bronze_{k}")).count()
+        if n_csv != n_tab: difs[k] = (n_csv, n_tab)
+    return not difs, "todas iguales" if not difs else f"diferencias (csv,tabla)={difs}"
+
+@prueba("IT-02","Integración","RNF-04","Existen las 6 tablas Bronze, 6 Silver, gold_ventas y los 9 KPI",
+        "22 tablas existentes","spark.catalog.tableExists")
+def _():
+    nombres = [T(f"bronze_{b}") for b in BRONZE] + [T(f"silver_{b}") for b in BRONZE] + [T("gold_ventas")] + [K(k) for k in KPIS]
+    faltan = [n for n in nombres if not spark.catalog.tableExists(n)]
+    return not faltan, "todas existen" if not faltan else f"faltan={faltan}"
+
+@prueba("IT-03","Integración","RNF-04","Silver nunca tiene más filas que Bronze (por tabla)",
+        "silver <= bronze en 6 de 6","Conteos en 'obtenido'")
+def _():
+    malas = {}
+    for b in BRONZE:
+        nb, ns = spark.table(T(f"bronze_{b}")).count(), spark.table(T(f"silver_{b}")).count()
+        if ns > nb: malas[b] = (nb, ns)
+    return not malas, "ok" if not malas else f"{malas}"
+
+@prueba("IT-04","Integración","RF-08","gold_ventas coincide con el JOIN recalculado desde las tablas Silver guardadas",
+        "conteo gold_ventas = conteo del JOIN independiente","Conteos en 'obtenido'")
+def _():
+    esperado = val(f"""
+      SELECT COUNT(*) FROM {T('silver_detalles')} d
+      JOIN {T('silver_pedidos')} p ON d.order_id=p.order_id
+      JOIN {T('silver_clientes')} c ON p.customer_id=c.customer_id
+      JOIN {T('silver_productos')} pr ON d.product_id=pr.product_id
+      JOIN {T('silver_vendedores')} v ON d.seller_id=v.seller_id
+      JOIN {T('silver_categorias')} cat ON pr.product_category_name=cat.product_category_name""")
+    real = spark.table(T("gold_ventas")).count()
+    return esperado == real, f"recalculado={esperado}, gold_ventas={real}"
+
+@prueba("IT-05","Integración","RNF-04","Los 9 KPI tienen filas (el flujo completo los pobló)",
+        "9 de 9 con COUNT>0","Conteos en 'obtenido'")
+def _():
+    vacios = [k for k in KPIS if spark.table(K(k)).count() == 0]
+    return not vacios, "todos con datos" if not vacios else f"vacíos={vacios}"
+
+@prueba("IT-06","Integración","RNF-04",
+        "Orden de ejecución Bronze → Silver → Gold según el historial Delta de las tablas",
+        "última escritura Bronze <= Silver <= gold_ventas <= KPIs",
+        f"CSV {RUTA_EVID}/historial_tablas_{RUN_ID}.csv")
+def _():
+    import pandas as pd
+    def ultima(t):
+        h = (spark.sql(f"DESCRIBE HISTORY {t}")
+                  .filter("operation RLIKE 'WRITE|CREATE|REPLACE'")
+                  .agg(F.max("timestamp")).first()[0])
+        return h
+    capas = {
+        "bronze":      [T(f"bronze_{b}") for b in BRONZE],
+        "silver":      [T(f"silver_{b}") for b in BRONZE],
+        "gold_ventas": [T("gold_ventas")],
+        "kpis":        [K(k) for k in KPIS],
+    }
+    filas, ts = [], {}
+    for capa, tablas in capas.items():
+        vals = []
+        for t in tablas:
+            u = ultima(t)
+            filas.append({"capa": capa, "tabla": t, "ultima_escritura": u})
+            vals.append(u)
+        ts[capa] = (min(vals), max(vals))
+    pd.DataFrame(filas).to_csv(f"{RUTA_EVID}/historial_tablas_{RUN_ID}.csv", index=False)
+
+    ok = (ts["bronze"][1] <= ts["silver"][0] and
+          ts["silver"][0] <= ts["gold_ventas"][0] and
+          ts["gold_ventas"][0] <= ts["kpis"][1])
+    return ok, (f"bronze hasta {ts['bronze'][1]:%Y-%m-%d %H:%M} | silver desde {ts['silver'][0]:%Y-%m-%d %H:%M} | "
+                f"gold_ventas {ts['gold_ventas'][0]:%Y-%m-%d %H:%M} | KPIs hasta {ts['kpis'][1]:%Y-%m-%d %H:%M}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 5. Calidad de datos (DQ)
+
+# COMMAND ----------
+
+@prueba("DQ-01","Calidad de datos","RNF-02","Completitud: claves y campos obligatorios sin nulos ni vacíos en Silver",
+        "0 nulos/vacíos","Conteos por columna en 'obtenido'")
+def _():
+    reglas = {"silver_clientes":["customer_id","customer_unique_id","nombre_cliente"],
+              "silver_pedidos":["order_id","customer_id","order_status","order_purchase_timestamp"],
+              "silver_detalles":["order_id","order_item_id","product_id","seller_id","price","freight_value"],
+              "silver_productos":["product_id"],
+              "silver_vendedores":["seller_id","nombre_vendedor"],
+              "silver_categorias":["product_category_name","product_category_name_english"]}
+    malas = {}
+    for t, cols in reglas.items():
+        df = spark.table(T(t))
+        for c in cols:
+            n = df.filter(col(c).isNull() | (trim(col(c).cast("string")) == "")).count()
+            if n: malas[f"{t}.{c}"] = n
+    return not malas, "0 nulos" if not malas else f"{malas}"
+
+@prueba("DQ-02","Calidad de datos","RF-04","Unicidad de claves primarias en Silver y gold_ventas",
+        "0 claves repetidas","Conteos en 'obtenido'")
+def _():
+    pk = {"silver_clientes":["customer_id"],"silver_pedidos":["order_id"],
+          "silver_detalles":["order_id","order_item_id"],"silver_productos":["product_id"],
+          "silver_vendedores":["seller_id"],"silver_categorias":["product_category_name"],
+          "gold_ventas":["order_id","order_item_id"]}
+    malas = {}
+    for t, k in pk.items():
+        n = spark.table(T(t)).groupBy(*k).count().filter("count > 1").count()
+        if n: malas[t] = n
+    return not malas, "0 duplicados" if not malas else f"{malas}"
+
+
+@prueba(
+    "DQ-03",
+    "Calidad de datos",
+    "RNF-01",
+    "Integridad referencial en Silver (sin huérfanos)",
+    "0 huérfanos en 4 relaciones",
+    "Conteos por relación en 'obtenido'"
+)
+def _():
+
+    rel = {
+        "detalles->pedidos": (
+            "silver_detalles", "order_id",
+            "silver_pedidos", "order_id"
+        ),
+        "detalles->productos": (
+            "silver_detalles", "product_id",
+            "silver_productos", "product_id"
+        ),
+        "detalles->vendedores": (
+            "silver_detalles", "seller_id",
+            "silver_vendedores", "seller_id"
+        ),
+        "pedidos->clientes": (
+            "silver_pedidos", "customer_id",
+            "silver_clientes", "customer_id"
+        )
+    }
+
+    malas = {}
+
+    for nom, (h, hc, p, pc) in rel.items():
+
+        df_h = spark.table(T(h)).alias("h")
+        df_p = spark.table(T(p)).alias("p")
+
+        n = (
+            df_h.join(
+                df_p,
+                df_h[hc] == df_p[pc],
+                "left_anti"
+            )
+            .count()
+        )
+
+        malas[nom] = n
+
+    total_huerfanos = sum(malas.values())
+
+    return (
+        total_huerfanos == 0,
+        str(malas)
+    )
+
+
+@prueba("DQ-04","Calidad de datos","RNF-03","Validez: price/freight >= 0, estado UF válido, order_status = 'delivered'",
+        "0 filas inválidas","Conteos en 'obtenido'")
+def _():
+    uf = ",".join(f"'{u}'" for u in UF_VALIDAS)
+    chequeos = {
+      "price<0": f"SELECT COUNT(*) FROM {T('silver_detalles')} WHERE price<0",
+      "freight<0": f"SELECT COUNT(*) FROM {T('silver_detalles')} WHERE freight_value<0",
+      "UF cliente inválida": f"SELECT COUNT(*) FROM {T('silver_clientes')} WHERE customer_state NOT IN ({uf})",
+      "UF vendedor inválida": f"SELECT COUNT(*) FROM {T('silver_vendedores')} WHERE seller_state NOT IN ({uf})",
+      "status!=delivered": f"SELECT COUNT(*) FROM {T('silver_pedidos')} WHERE order_status<>'delivered'"}
+    malas = {k: v for k, q in chequeos.items() if (v := val(q))}
+    return not malas, "0 inválidos" if not malas else f"{malas}"
+
+@prueba("DQ-05","Calidad de datos","RNF-03","Fechas de compra dentro del rango esperado",
+        f"todas entre {FECHA_MIN} y {FECHA_MAX}","Mín/máx en 'obtenido'")
+def _():
+    mn, mx = spark.sql(f"SELECT MIN(order_purchase_timestamp), MAX(order_purchase_timestamp) FROM {T('silver_pedidos')}").first()
+    n = val(f"SELECT COUNT(*) FROM {T('silver_pedidos')} WHERE order_purchase_timestamp NOT BETWEEN '{FECHA_MIN}' AND '{FECHA_MAX} 23:59:59'")
+    return n == 0, f"min={mn}, max={mx}, fuera de rango={n}"
+
+@prueba("DQ-06","Calidad de datos","RF-08","gold_ventas sin nulos en campos obligatorios",
+        "0 nulos","Conteos por columna en 'obtenido'")
+def _():
+    df = spark.table(T("gold_ventas"))
+    obligatorias = ["order_id","order_item_id","customer_id","product_id","product_category_name_english",
+                    "seller_id","price","freight_value","order_purchase_timestamp","nombre_cliente","nombre_vendedor"]
+    malas = {c: n for c in obligatorias if (n := df.filter(col(c).isNull()).count())}
+    return not malas, "0 nulos" if not malas else f"{malas}"
+
+@prueba("DQ-07","Calidad de datos","RF-03","Retención: silver_pedidos = pedidos 'delivered' distintos de Bronze (con claves y fecha)",
+        "conteos iguales","Conteos en 'obtenido'")
+def _():
+    esperado = val(f"""SELECT COUNT(DISTINCT order_id) FROM {T('bronze_pedidos')}
+        WHERE lower(trim(order_status))='delivered' AND order_id IS NOT NULL AND trim(order_id)<>''
+          AND customer_id IS NOT NULL AND trim(customer_id)<>'' AND order_purchase_timestamp IS NOT NULL""")
+    real = spark.table(T("silver_pedidos")).count()
+    return esperado == real, f"bronze_delivered={esperado}, silver={real}"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Seguridad (SEC)
+# MAGIC Evidencia de permisos: se guarda `SHOW GRANTS` en el Volume `evidencias`.
+
+# COMMAND ----------
+
+@prueba("SEC-01","Seguridad","RNF-05","Ningún grupo amplio ('account users'/'users') tiene MODIFY ni ALL PRIVILEGES sobre el esquema",
+        "0 concesiones amplias de escritura",f"CSV {RUTA_EVID}/grants_{RUN_ID}.csv")
+def _():
+    g = spark.sql(f"SHOW GRANTS ON SCHEMA {CAT}.{ESQ}").toPandas()
+    g.columns = [c.lower() for c in g.columns]
+    g.to_csv(f"{RUTA_EVID}/grants_{RUN_ID}.csv", index=False)
+    malas = g[g["principal"].str.lower().isin(["account users","users"]) &
+              g["actiontype"].str.upper().isin(["MODIFY","ALL PRIVILEGES"])]
+    return malas.empty, f"{len(g)} concesiones revisadas; amplias de escritura={len(malas)}"
+
+@prueba("SEC-02","Seguridad","RNF-05","Permisos sobre el Volume de CSV de origen revisados (sin escritura para grupos amplios)",
+        "0 concesiones amplias de escritura",f"CSV {RUTA_EVID}/grants_volume_{RUN_ID}.csv")
+def _():
+    g = spark.sql(f"SHOW GRANTS ON VOLUME {CAT}.{ESQ}.olist").toPandas()
+    g.columns = [c.lower() for c in g.columns]
+    g.to_csv(f"{RUTA_EVID}/grants_volume_{RUN_ID}.csv", index=False)
+    malas = g[g["principal"].str.lower().isin(["account users","users"]) &
+              g["actiontype"].str.upper().isin(["WRITE VOLUME","ALL PRIVILEGES"])]
+    return malas.empty, f"{len(g)} concesiones; amplias de escritura={len(malas)}"
+
+@prueba("SEC-03","Seguridad","RNF-06","Silver/Gold sin columnas de PII (email, teléfono, CPF, código postal, comentarios)",
+        "0 columnas prohibidas","Lista de columnas en 'obtenido'")
+def _():
+    prohibidas = ["email","phone","telefono","cpf","zip_code","review_comment"]
+    tablas = [T(f"silver_{b}") for b in BRONZE] + [T("gold_ventas")]
+    malas = [f"{t}.{c}" for t in tablas for c in spark.table(t).columns if any(p in c.lower() for p in prohibidas)]
+    return not malas, "sin columnas prohibidas" if not malas else f"{malas}"
+
+@prueba("SEC-04","Seguridad","RNF-06","Nombres de clientes/vendedores son seudónimos 'Nombre Apellido' (100% cubiertos)",
+        "0 nombres nulos o con formato distinto","Conteos en 'obtenido'")
+def _():
+    rx = r"^\S+ \S+$"
+    c = spark.table(T("silver_clientes")).filter(~col("nombre_cliente").rlike(rx) | col("nombre_cliente").isNull()).count()
+    v = spark.table(T("silver_vendedores")).filter(~col("nombre_vendedor").rlike(rx) | col("nombre_vendedor").isNull()).count()
+    return c == 0 and v == 0, f"clientes fuera de formato={c}, vendedores={v}"
+
+EQUIPO = {
+    "n00433508@upn.pe",
+    "kennychucari@gmail.com", "jhunzualbi@gmail.com", "nicole.mendoza.professional@gmail.com",   
+}
+MODIFICAN = {USUARIO.lower(), "n00433508@upn.pe", "nicole.mendoza.professional@gmail.com"}   
+
+@prueba("SEC-05","Seguridad","RNF-05",
+        "Mínimo privilegio: solo el equipo tiene acceso y solo los autorizados pueden modificar",
+        "0 principales ajenos al equipo; 0 MODIFY fuera de la lista autorizada",
+        f"CSV {RUTA_EVID}/grants_tablas_{RUN_ID}.csv")
+def _():
+    import pandas as pd
+    tablas = [T("silver_clientes"), T("silver_vendedores"), T("gold_ventas")]
+    partes, duenos = [], set()
+    for t in tablas:
+        g = spark.sql(f"SHOW GRANTS ON TABLE {t}").toPandas()
+        g.columns = [c.lower() for c in g.columns]
+        g["tabla"] = t
+        partes.append(g)
+        d = spark.sql(f"DESCRIBE TABLE EXTENDED {t}").filter("col_name = 'Owner'").first()
+        if d: duenos.add(d["data_type"].lower())
+    todo = pd.concat(partes, ignore_index=True)
+    todo.to_csv(f"{RUTA_EVID}/grants_tablas_{RUN_ID}.csv", index=False)
+    if todo.empty:
+        return True, "Sin concesiones explícitas (solo propietarios)"
+
+    equipo = {e.lower() for e in EQUIPO} | {USUARIO.lower()} | duenos
+    modif  = {e.lower() for e in MODIFICAN} | duenos
+    p = todo["principal"].str.lower()
+    ajenos  = sorted(set(todo[~p.isin(equipo)]["principal"]))
+    excesos = sorted(set(todo[todo["actiontype"].str.upper().isin(["MODIFY","ALL PRIVILEGES"]) & ~p.isin(modif)]["principal"]))
+    ok = not ajenos and not excesos
+    return ok, (f"Verificación indirecta. Ajenos al equipo: {ajenos or 'ninguno'}. "
+                f"MODIFY sin autorización: {excesos or 'ninguno'}")
+
+@prueba("SEC-07","Seguridad","RNF-06",
+        "Enmascaramiento de columna: quien no pertenece al grupo autorizado ve el valor oculto",
+        "Valor devuelto = '***'", "Resultado de la consulta en 'obtenido'")
+def _():
+    f = f"{CAT}.{ESQ_QA}.mask_demo"
+    t = f"{CAT}.{ESQ_QA}.sec_demo"
+    spark.sql(f"""CREATE OR REPLACE FUNCTION {f}(v STRING)
+                  RETURN CASE WHEN is_account_group_member('qa_admin_datos') THEN v ELSE '***' END""")
+    spark.sql(f"CREATE OR REPLACE TABLE {t} (id INT, email STRING)")
+    spark.sql(f"INSERT INTO {t} VALUES (1, 'cliente@ejemplo.com')")
+    spark.sql(f"ALTER TABLE {t} ALTER COLUMN email SET MASK {f}")
+    visto = val(f"SELECT email FROM {t} WHERE id = 1")
+    return visto == "***", f"valor visto por {USUARIO}: {visto}"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Aceptación (UAT)
+# MAGIC Cada KPI se **recalcula de forma independiente desde Bronze** (no desde Silver) y se concilia con lo que publicó Gold.
+
+# COMMAND ----------
+
+BASE_BRONZE = f"""
+  FROM {T('bronze_detalles')} i
+  JOIN {T('bronze_pedidos')} o ON i.order_id=o.order_id AND lower(trim(o.order_status))='delivered'
+  JOIN {T('bronze_productos')} p ON i.product_id=p.product_id
+  JOIN {T('bronze_categorias')} c ON p.product_category_name=c.product_category_name"""
+
+@prueba("UAT-01","Aceptación","RF-09","KPI-01 ingresos totales = recálculo independiente desde Bronze",
+        f"diferencia < {TOL}","Valores en 'obtenido' + consulta SQL en este notebook")
+def _():
+    kpi = float(val(f"SELECT ingresos_totales FROM {K('gold_kpi_01_ingresos_totales')}"))
+    ref = float(val(f"SELECT ROUND(SUM(i.price),2) {BASE_BRONZE}"))
+    return abs(kpi - ref) < TOL, f"KPI={kpi}, Bronze={ref}, dif={round(kpi-ref,2)}"
+
+@prueba("UAT-02","Aceptación","RF-13","KPI-08 pedidos entregados = recálculo desde Bronze",
+        "diferencia = 0","Valores en 'obtenido'")
+def _():
+    kpi = val(f"SELECT total_pedidos_entregados FROM {K('gold_kpi_08_total_pedidos_entregados')}")
+    ref = val(f"SELECT COUNT(DISTINCT i.order_id) {BASE_BRONZE}")
+    return kpi == ref, f"KPI={kpi}, Bronze={ref}"
+
+@prueba("UAT-03","Aceptación","RF-13","KPI-09 artículos vendidos = recálculo desde Bronze",
+        "diferencia = 0","Valores en 'obtenido'")
+def _():
+    kpi = val(f"SELECT total_articulos_vendidos FROM {K('gold_kpi_09_total_articulos_vendidos')}")
+    ref = val(f"SELECT COUNT(*) {BASE_BRONZE}")
+    return kpi == ref, f"KPI={kpi}, Bronze={ref}"
+
+@prueba("UAT-04","Aceptación","RF-13","KPI-07 total vendedores = vendedores distintos en gold_ventas (misma base que los demás KPI)",
+        "diferencia = 0","Valores en 'obtenido'")
+def _():
+    kpi = val(f"SELECT total_vendedores FROM {K('gold_kpi_07_total_vendedores')}")
+    ref = val(f"SELECT COUNT(DISTINCT seller_id) FROM {T('gold_ventas')}")
+    return kpi == ref, (f"KPI={kpi}, gold_ventas={ref}. " +
+        ("" if kpi == ref else "KPI-07 no aplica el filtro de categoría que sí usan los demás KPI."))
+
+@prueba("UAT-05","Aceptación","RF-09","KPI-01 = SUM(price) de gold_ventas",
+        f"diferencia < {TOL}","Valores en 'obtenido'")
+def _():
+    kpi = float(val(f"SELECT ingresos_totales FROM {K('gold_kpi_01_ingresos_totales')}"))
+    ref = float(val(f"SELECT ROUND(SUM(price),2) FROM {T('gold_ventas')}"))
+    return abs(kpi - ref) < TOL, f"KPI={kpi}, gold_ventas={ref}"
+
+@prueba("UAT-06","Aceptación","RF-10","KPI-02 top 10 vendedores: 10 filas, orden descendente y montos = recálculo desde gold_ventas",
+        "mismos 10 montos","Montos en 'obtenido'")
+def _():
+    kpi = [float(r[0]) for r in spark.table(K("gold_kpi_02_top_vendedores")).orderBy("position").select("ingresos_totales").collect()]
+    ref = [float(r[0]) for r in spark.sql(f"""SELECT ROUND(SUM(price),2) s FROM {T('gold_ventas')}
+                                              GROUP BY seller_id ORDER BY s DESC LIMIT 10""").collect()]
+    return kpi == ref and kpi == sorted(kpi, reverse=True) and len(kpi) == 10, f"KPI={kpi[:3]}..., ref={ref[:3]}..."
+
+@prueba("UAT-07","Aceptación","RF-10","KPI-03 top 10 categorías = recálculo desde gold_ventas",
+        "mismos 10 montos","Montos en 'obtenido'")
+def _():
+    kpi = [float(r[0]) for r in spark.table(K("gold_kpi_03_ingresos_categoria")).orderBy("position").select("ingresos_totales").collect()]
+    ref = [float(r[0]) for r in spark.sql(f"""SELECT ROUND(SUM(price),2) s FROM {T('gold_ventas')}
+                                              GROUP BY product_category_name_english ORDER BY s DESC LIMIT 10""").collect()]
+    return kpi == ref and len(kpi) == 10, f"KPI={kpi[:3]}..., ref={ref[:3]}..."
+
+@prueba("UAT-08","Aceptación","RF-11","KPI-04: la suma de ingresos mensuales = KPI-01",
+        f"diferencia < {TOL}","Valores en 'obtenido'")
+def _():
+    s = float(val(f"SELECT SUM(ingresos_totales) FROM {K('gold_kpi_04_evolucion_mensual')}"))
+    k = float(val(f"SELECT ingresos_totales FROM {K('gold_kpi_01_ingresos_totales')}"))
+    return abs(s - k) < 0.05, f"suma_meses={round(s,2)}, KPI-01={k}"   # 0.05 por redondeo mensual
+
+@prueba("UAT-09","Aceptación","RF-11","KPI-05: variación % recalculada desde sus propias columnas; primer mes sin anterior",
+        "0 filas con variación distinta","Conteo en 'obtenido'")
+def _():
+    df = spark.table(K("gold_kpi_05_variacion_mensual"))
+    malas = df.filter(col("ingresos_anteriores").isNotNull() & (col("ingresos_anteriores") != 0) &
+        (F.abs(col("variacion_porcentual") -
+               F.round((col("ingresos_actuales") - col("ingresos_anteriores")) / col("ingresos_anteriores") * 100, 2)) > 0.01)).count()
+    n5, n4 = df.count(), spark.table(K("gold_kpi_04_evolucion_mensual")).count()
+    return malas == 0 and n5 == n4, f"filas con error={malas}, filas KPI-05={n5}, KPI-04={n4}"
+
+@prueba("UAT-10","Aceptación","RF-12","KPI-06: suma por estado = KPI-01 y los 27 estados tienen coordenadas",
+        "sin pérdida por estados sin coordenadas","Valores en 'obtenido'")
+def _():
+    s = float(val(f"SELECT SUM(ingresos_totales) FROM {K('gold_kpi_06_distribucion_geografica')}"))
+    k = float(val(f"SELECT ingresos_totales FROM {K('gold_kpi_01_ingresos_totales')}"))
+    n = val(f"SELECT COUNT(*) FROM {K('gold_kpi_06_distribucion_geografica')}")
+    return abs(s - k) < 0.05 and n == 27, f"suma_estados={round(s,2)}, KPI-01={k}, estados={n}"
+
+@prueba("UAT-11","Aceptación","RNF-08","Pérdida de ingresos por productos sin categoría/traducción dentro del umbral del negocio",
+        f"<= {UMBRAL_PERDIDA_PCT}% (decisión del negocio)","Valores en 'obtenido'")
+def _():
+    total = float(val(f"""SELECT SUM(i.price) FROM {T('bronze_detalles')} i
+        JOIN {T('bronze_pedidos')} o ON i.order_id=o.order_id AND lower(trim(o.order_status))='delivered'"""))
+    gold = float(val(f"SELECT SUM(price) FROM {T('gold_ventas')}"))
+    pct = round((total - gold) / total * 100, 2)
+    return pct <= UMBRAL_PERDIDA_PCT, (f"entregados Bronze={round(total,2)}, en Gold={round(gold,2)}, "
+        f"excluido={round(total-gold,2)} ({pct}%) por INNER JOIN con categorías")
+
+
+
+# COMMAND ----------
+
+# ============================================
+# 8. GUARDAR RESULTADOS Y MATRIZ DE TRAZABILIDAD
+# ============================================
+esquema = ("id_prueba string, tipo string, id_requisito string, prueba string, esperado string, "
+           "resultado string, obtenido string, evidencia string, run_id string, ejecutado_por string, fecha timestamp")
+ULTIMAS = list({fila[0]: fila for fila in RESULTADOS}.values())
+df_res = spark.createDataFrame(ULTIMAS, esquema)
+df_res.write.mode("append").saveAsTable(f"{CAT}.{ESQ_QA}.resultados")
+print("Resultados guardados en", f"{CAT}.{ESQ_QA}.resultados")
+
+display(df_res.groupBy("tipo", "resultado").count().orderBy("tipo", "resultado"))
+
+# COMMAND ----------
+
+# Matriz de trazabilidad: requisito -> prueba -> resultado -> evidencia (última ejecución)
+matriz = spark.sql(f"""
+  SELECT r.id_requisito, r.descripcion, t.id_prueba, t.tipo, t.prueba, t.esperado,
+         COALESCE(t.resultado,'SIN PRUEBA') AS resultado, t.obtenido, t.evidencia, t.fecha
+  FROM {CAT}.{ESQ_QA}.requisitos r
+  LEFT JOIN (SELECT * FROM {CAT}.{ESQ_QA}.resultados WHERE run_id = '{RUN_ID}') t USING (id_requisito)
+  ORDER BY r.id_requisito, t.id_prueba""")
+display(matriz)
+
+# Exportar como evidencia
+matriz.toPandas().to_csv(f"{RUTA_EVID}/matriz_trazabilidad_{RUN_ID}.csv", index=False, encoding="utf-8-sig")
+print("Matriz exportada a", f"{RUTA_EVID}/matriz_trazabilidad_{RUN_ID}.csv")
+
+# COMMAND ----------
+
+# Pruebas que requieren atención
+display(df_res.filter("resultado IN ('FAIL','ERROR')").select("id_prueba","id_requisito","prueba","obtenido"))
