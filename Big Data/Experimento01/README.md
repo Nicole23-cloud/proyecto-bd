@@ -1,4 +1,4 @@
-###Experimento de escalabilidad y particionamiento – Olist
+##Experimento de escalabilidad y particionamiento – Olist
 Proyecto de Big Data y Business Intelligence · Databricks (PySpark / Spark SQL)
 1. Objetivo
 Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de datos (factores x1, x10 y x50) y comparar dos formas de almacenarla: sin partición y particionada por año y mes. Se midieron dos cosas: el tiempo de carga (escritura de la tabla) y el tiempo de respuesta de cuatro consultas analíticas típicas.
