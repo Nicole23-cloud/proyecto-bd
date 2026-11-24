@@ -1,0 +1,1083 @@
+{
+  "datasets": [
+    {
+      "name": "1f8db19a",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "SELECT\n",
+        "  ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "FROM\n",
+        "  `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "      ON d.order_id = p.order_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "      ON d.product_id = pr.product_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "      ON pr.product_category_name = cat.product_category_name\n",
+        "WHERE\n",
+        "  cat.product_category_name_english IS NOT NULL"
+      ]
+    },
+    {
+      "name": "63549f79",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "CREATE OR REPLACE TABLE default.gold_kpi_01_ingresos_totales AS\n",
+        "\n",
+        "SELECT\n",
+        "    ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "\n",
+        "FROM silver_detalles d\n",
+        "\n",
+        "INNER JOIN silver_pedidos p\n",
+        "    ON d.order_id = p.order_id\n",
+        "\n",
+        "INNER JOIN silver_productos pr\n",
+        "    ON d.product_id = pr.product_id\n",
+        "\n",
+        "INNER JOIN silver_categorias cat\n",
+        "    ON pr.product_category_name = cat.product_category_name\n",
+        "\n",
+        "WHERE cat.product_category_name_english IS NOT NULL;\n",
+        "\n",
+        "-- MOSTRAR RESULTADO\n",
+        "SELECT *\n",
+        "FROM default.gold_kpi_01_ingresos_totales;\n"
+      ]
+    },
+    {
+      "name": "0a3face8",
+      "displayName": "Top 10 Vendedores por Ingresos",
+      "queryLines": [
+        "WITH ingresos_vendedor AS (\n",
+        "  SELECT\n",
+        "    v.seller_id,\n",
+        "    v.nombre_vendedor,\n",
+        "    ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "  FROM\n",
+        "    `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "        ON d.order_id = p.order_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_vendedores` v\n",
+        "        ON d.seller_id = v.seller_id\n",
+        "  WHERE\n",
+        "    cat.product_category_name_english IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    v.seller_id,\n",
+        "    v.nombre_vendedor\n",
+        ")\n",
+        "SELECT\n",
+        "  CONCAT(\n",
+        "    LPAD(CAST(ROW_NUMBER() OVER (ORDER BY ingresos_totales DESC) AS STRING), 2, '0'),\n",
+        "    '. ',\n",
+        "    nombre_vendedor\n",
+        "  ) AS nombre_vendedor,\n",
+        "  ingresos_totales\n",
+        "FROM\n",
+        "  ingresos_vendedor\n",
+        "ORDER BY\n",
+        "  ingresos_totales DESC\n",
+        "LIMIT 10"
+      ]
+    },
+    {
+      "name": "103c13ae",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "CREATE OR REPLACE TABLE default.gold_kpi_02_top_vendedores AS\n",
+        "\n",
+        "WITH ingresos_vendedor AS (\n",
+        "    SELECT\n",
+        "        v.seller_id,\n",
+        "        v.nombre_vendedor,\n",
+        "        ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "    FROM silver_detalles d\n",
+        "    INNER JOIN silver_pedidos p\n",
+        "        ON d.order_id = p.order_id\n",
+        "    INNER JOIN silver_productos pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "    INNER JOIN silver_categorias cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "    INNER JOIN silver_vendedores v\n",
+        "        ON d.seller_id = v.seller_id\n",
+        "    WHERE cat.product_category_name_english IS NOT NULL\n",
+        "    GROUP BY\n",
+        "        v.seller_id,\n",
+        "        v.nombre_vendedor\n",
+        "),\n",
+        "ranking AS (\n",
+        "    SELECT\n",
+        "        ROW_NUMBER() OVER (\n",
+        "            ORDER BY ingresos_totales DESC\n",
+        "        ) AS position,\n",
+        "        seller_id,\n",
+        "        nombre_vendedor,\n",
+        "        ingresos_totales\n",
+        "    FROM ingresos_vendedor\n",
+        ")\n",
+        "SELECT\n",
+        "    position,\n",
+        "    CONCAT(\n",
+        "        LPAD(CAST(position AS STRING), 2, '0'),\n",
+        "        '. ',\n",
+        "        nombre_vendedor\n",
+        "    ) AS nombre_vendedor,\n",
+        "    ingresos_totales\n",
+        "FROM ranking\n",
+        "WHERE position <= 10\n",
+        "ORDER BY position;\n",
+        "\n",
+        "SELECT *\n",
+        "FROM default.gold_kpi_02_top_vendedores;"
+      ]
+    },
+    {
+      "name": "c48a4cc4",
+      "displayName": "Top 10 Categorías por Ingresos",
+      "queryLines": [
+        "WITH ingresos_categoria AS (\n",
+        "  SELECT\n",
+        "    cat.product_category_name_english,\n",
+        "    ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "  FROM\n",
+        "    `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "        ON d.order_id = p.order_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "  WHERE\n",
+        "    cat.product_category_name_english IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    cat.product_category_name_english\n",
+        ")\n",
+        "SELECT\n",
+        "  CONCAT(\n",
+        "    LPAD(CAST(ROW_NUMBER() OVER (ORDER BY ingresos_totales DESC) AS STRING), 2, '0'),\n",
+        "    '. ',\n",
+        "    product_category_name_english\n",
+        "  ) AS categoria_producto,\n",
+        "  ingresos_totales\n",
+        "FROM\n",
+        "  ingresos_categoria\n",
+        "ORDER BY\n",
+        "  ingresos_totales DESC\n",
+        "LIMIT 10"
+      ]
+    },
+    {
+      "name": "e60641f0",
+      "displayName": "Evolución Mensual de Ingresos",
+      "queryLines": [
+        "SELECT\n",
+        "  MAKE_DATE(YEAR(p.order_purchase_timestamp), MONTH(p.order_purchase_timestamp), 1) AS fecha_mes,\n",
+        "  CONCAT(\n",
+        "    CAST(YEAR(p.order_purchase_timestamp) AS STRING),\n",
+        "    '-',\n",
+        "    LPAD(CAST(MONTH(p.order_purchase_timestamp) AS STRING), 2, '0')\n",
+        "  ) AS etiqueta_mes,\n",
+        "  ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "FROM\n",
+        "  `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "      ON d.order_id = p.order_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "      ON d.product_id = pr.product_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "      ON pr.product_category_name = cat.product_category_name\n",
+        "WHERE\n",
+        "  cat.product_category_name_english IS NOT NULL\n",
+        "GROUP BY\n",
+        "  YEAR(p.order_purchase_timestamp),\n",
+        "  MONTH(p.order_purchase_timestamp)\n",
+        "ORDER BY\n",
+        "  fecha_mes ASC"
+      ]
+    },
+    {
+      "name": "9ac1d4c1",
+      "displayName": "Variación Mensual de Ingresos",
+      "queryLines": [
+        "WITH ingresos_mensuales AS (\n",
+        "  SELECT\n",
+        "    YEAR(p.order_purchase_timestamp) AS anio,\n",
+        "    MONTH(p.order_purchase_timestamp) AS mes,\n",
+        "    ROUND(SUM(d.price), 2) AS ingresos\n",
+        "  FROM\n",
+        "    `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "        ON d.order_id = p.order_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "  WHERE\n",
+        "    cat.product_category_name_english IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    YEAR(p.order_purchase_timestamp),\n",
+        "    MONTH(p.order_purchase_timestamp)\n",
+        "),\n",
+        "comparacion AS (\n",
+        "  SELECT\n",
+        "    actual.anio,\n",
+        "    actual.mes,\n",
+        "    actual.ingresos AS ingresos_actuales,\n",
+        "    anterior.ingresos AS ingresos_anteriores\n",
+        "  FROM\n",
+        "    ingresos_mensuales actual\n",
+        "      LEFT JOIN ingresos_mensuales anterior\n",
+        "        ON anterior.anio\n",
+        "          = CASE\n",
+        "            WHEN actual.mes = 1 THEN actual.anio - 1\n",
+        "            ELSE actual.anio\n",
+        "          END\n",
+        "        AND anterior.mes\n",
+        "          = CASE\n",
+        "            WHEN actual.mes = 1 THEN 12\n",
+        "            ELSE actual.mes - 1\n",
+        "          END\n",
+        ")\n",
+        "SELECT\n",
+        "  CONCAT(\n",
+        "    LPAD(CAST(mes AS STRING), 2, '0'),\n",
+        "    '. ',\n",
+        "    CASE mes\n",
+        "      WHEN 1 THEN 'Ene'\n",
+        "      WHEN 2 THEN 'Feb'\n",
+        "      WHEN 3 THEN 'Mar'\n",
+        "      WHEN 4 THEN 'Abr'\n",
+        "      WHEN 5 THEN 'May'\n",
+        "      WHEN 6 THEN 'Jun'\n",
+        "      WHEN 7 THEN 'Jul'\n",
+        "      WHEN 8 THEN 'Ago'\n",
+        "      WHEN 9 THEN 'Sep'\n",
+        "      WHEN 10 THEN 'Oct'\n",
+        "      WHEN 11 THEN 'Nov'\n",
+        "      WHEN 12 THEN 'Dic'\n",
+        "    END,\n",
+        "    ' ',\n",
+        "    CAST(anio AS STRING)\n",
+        "  ) AS periodo,\n",
+        "  ROUND(ingresos_actuales, 2) AS ingresos_actuales,\n",
+        "  ROUND(ingresos_anteriores, 2) AS ingresos_anteriores,\n",
+        "  ROUND(ingresos_actuales - ingresos_anteriores, 2) AS diferencia_ingresos,\n",
+        "  ROUND(\n",
+        "    (ingresos_actuales - ingresos_anteriores) / NULLIF(ingresos_anteriores, 0) * 100,\n",
+        "    2\n",
+        "  ) AS variacion_porcentual\n",
+        "FROM\n",
+        "  comparacion\n",
+        "ORDER BY\n",
+        "  anio,\n",
+        "  mes"
+      ]
+    },
+    {
+      "name": "88752359",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "CREATE OR REPLACE TABLE default.gold_kpi_05_variacion_mensual AS\n",
+        "\n",
+        "WITH ingresos_mensuales AS (\n",
+        "    SELECT\n",
+        "        YEAR(p.order_purchase_timestamp) AS anio,\n",
+        "        MONTH(p.order_purchase_timestamp) AS mes,\n",
+        "        ROUND(SUM(d.price), 2) AS ingresos\n",
+        "\n",
+        "    FROM silver_detalles d\n",
+        "\n",
+        "    INNER JOIN silver_pedidos p\n",
+        "        ON d.order_id = p.order_id\n",
+        "\n",
+        "    INNER JOIN silver_productos pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "\n",
+        "    INNER JOIN silver_categorias cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "\n",
+        "    WHERE cat.product_category_name_english IS NOT NULL\n",
+        "\n",
+        "    GROUP BY\n",
+        "        YEAR(p.order_purchase_timestamp),\n",
+        "        MONTH(p.order_purchase_timestamp)\n",
+        "),\n",
+        "\n",
+        "comparacion AS (\n",
+        "    SELECT\n",
+        "        actual.anio,\n",
+        "        actual.mes,\n",
+        "        actual.ingresos AS ingresos_actuales,\n",
+        "        anterior.ingresos AS ingresos_anteriores\n",
+        "\n",
+        "    FROM ingresos_mensuales actual\n",
+        "\n",
+        "    LEFT JOIN ingresos_mensuales anterior\n",
+        "        ON anterior.anio = CASE\n",
+        "            WHEN actual.mes = 1 THEN actual.anio - 1\n",
+        "            ELSE actual.anio\n",
+        "        END\n",
+        "\n",
+        "        AND anterior.mes = CASE\n",
+        "            WHEN actual.mes = 1 THEN 12\n",
+        "            ELSE actual.mes - 1\n",
+        "        END\n",
+        ")\n",
+        "\n",
+        "SELECT\n",
+        "    ROW_NUMBER() OVER (\n",
+        "        ORDER BY anio, mes\n",
+        "    ) AS position,\n",
+        "\n",
+        "    anio,\n",
+        "    mes,\n",
+        "\n",
+        "    CONCAT(\n",
+        "        LPAD(CAST(mes AS STRING), 2, '0'),\n",
+        "        '. ',\n",
+        "        CASE mes\n",
+        "            WHEN 1 THEN 'Ene'\n",
+        "            WHEN 2 THEN 'Feb'\n",
+        "            WHEN 3 THEN 'Mar'\n",
+        "            WHEN 4 THEN 'Abr'\n",
+        "            WHEN 5 THEN 'May'\n",
+        "            WHEN 6 THEN 'Jun'\n",
+        "            WHEN 7 THEN 'Jul'\n",
+        "            WHEN 8 THEN 'Ago'\n",
+        "            WHEN 9 THEN 'Sep'\n",
+        "            WHEN 10 THEN 'Oct'\n",
+        "            WHEN 11 THEN 'Nov'\n",
+        "            WHEN 12 THEN 'Dic'\n",
+        "        END,\n",
+        "        ' ',\n",
+        "        CAST(anio AS STRING)\n",
+        "    ) AS periodo,\n",
+        "\n",
+        "    ROUND(ingresos_actuales, 2) AS ingresos_actuales,\n",
+        "\n",
+        "    ROUND(ingresos_anteriores, 2) AS ingresos_anteriores,\n",
+        "\n",
+        "    ROUND(\n",
+        "        ingresos_actuales - ingresos_anteriores, 2\n",
+        "    ) AS diferencia_ingresos,\n",
+        "\n",
+        "    ROUND(\n",
+        "        (ingresos_actuales - ingresos_anteriores)\n",
+        "        / NULLIF(ingresos_anteriores, 0) * 100,\n",
+        "        2\n",
+        "    ) AS variacion_porcentual\n",
+        "\n",
+        "FROM comparacion\n",
+        "\n",
+        "ORDER BY anio, mes;\n",
+        "\n",
+        "SELECT *\n",
+        "FROM default.gold_kpi_05_variacion_mensual\n",
+        "ORDER BY position;"
+      ]
+    },
+    {
+      "name": "a9268ca9",
+      "displayName": "Distribución Geográfica de Ingresos",
+      "queryLines": [
+        "WITH coords (state, latitud, longitud) AS (\n",
+        "  VALUES\n",
+        "    ('AC', -9.97, -67.81),\n",
+        "    ('AL', -9.67, -35.74),\n",
+        "    ('AP', 0.03, -51.07),\n",
+        "    ('AM', -3.12, -60.02),\n",
+        "    ('BA', -12.97, -38.50),\n",
+        "    ('CE', -3.73, -38.52),\n",
+        "    ('DF', -15.79, -47.88),\n",
+        "    ('ES', -20.32, -40.34),\n",
+        "    ('GO', -16.68, -49.25),\n",
+        "    ('MA', -2.53, -44.30),\n",
+        "    ('MT', -15.60, -56.10),\n",
+        "    ('MS', -20.47, -54.62),\n",
+        "    ('MG', -19.92, -43.94),\n",
+        "    ('PA', -1.46, -48.50),\n",
+        "    ('PB', -7.12, -34.86),\n",
+        "    ('PR', -25.43, -49.27),\n",
+        "    ('PE', -8.05, -34.88),\n",
+        "    ('PI', -5.09, -42.80),\n",
+        "    ('RJ', -22.91, -43.17),\n",
+        "    ('RN', -5.79, -35.21),\n",
+        "    ('RS', -30.03, -51.23),\n",
+        "    ('RO', -8.76, -63.90),\n",
+        "    ('RR', 2.82, -60.67),\n",
+        "    ('SC', -27.60, -48.55),\n",
+        "    ('SP', -23.55, -46.63),\n",
+        "    ('SE', -10.91, -37.07),\n",
+        "    ('TO', -10.18, -48.33)\n",
+        "),\n",
+        "ventas_estado AS (\n",
+        "  SELECT\n",
+        "    c.customer_state AS state,\n",
+        "    ROUND(SUM(d.price), 2) AS ingresos_totales\n",
+        "  FROM\n",
+        "    `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "        ON d.order_id = p.order_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_clientes` c\n",
+        "        ON p.customer_id = c.customer_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "        ON d.product_id = pr.product_id\n",
+        "      INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "        ON pr.product_category_name = cat.product_category_name\n",
+        "  WHERE\n",
+        "    cat.product_category_name_english IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    c.customer_state\n",
+        ")\n",
+        "SELECT\n",
+        "  v.state,\n",
+        "  c.latitud,\n",
+        "  c.longitud,\n",
+        "  v.ingresos_totales\n",
+        "FROM\n",
+        "  ventas_estado v\n",
+        "    INNER JOIN coords c\n",
+        "      ON v.state = c.state\n",
+        "ORDER BY\n",
+        "  v.ingresos_totales DESC"
+      ]
+    },
+    {
+      "name": "aca17e2e",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "SELECT\n",
+        "  COUNT(DISTINCT d.seller_id) AS total_vendedores\n",
+        "FROM\n",
+        "  `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "      ON d.order_id = p.order_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "      ON d.product_id = pr.product_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "      ON pr.product_category_name = cat.product_category_name\n",
+        "WHERE\n",
+        "  p.order_status = 'delivered'\n",
+        "  AND cat.product_category_name_english IS NOT NULL"
+      ]
+    },
+    {
+      "name": "0072fcb5",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "CREATE OR REPLACE TABLE default.gold_kpi_07_total_vendedores AS\n",
+        "\n",
+        "SELECT\n",
+        "    COUNT(DISTINCT d.seller_id) AS total_vendedores\n",
+        "\n",
+        "FROM workspace.olist_nuevo.silver_detalles d\n",
+        "\n",
+        "INNER JOIN workspace.olist_nuevo.silver_pedidos p\n",
+        "    ON d.order_id = p.order_id\n",
+        "\n",
+        "INNER JOIN workspace.olist_nuevo.silver_productos pr\n",
+        "    ON d.product_id = pr.product_id\n",
+        "\n",
+        "INNER JOIN workspace.olist_nuevo.silver_categorias cat\n",
+        "    ON pr.product_category_name = cat.product_category_name\n",
+        "\n",
+        "WHERE p.order_status = 'delivered'\n",
+        "  AND cat.product_category_name_english IS NOT NULL;\n",
+        "\n",
+        "SELECT *\n",
+        "FROM default.gold_kpi_07_total_vendedores;"
+      ]
+    },
+    {
+      "name": "7e3734fd",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "SELECT\n",
+        "  COUNT(DISTINCT p.order_id) AS total_pedidos_entregados\n",
+        "FROM\n",
+        "  `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      ON p.order_id = d.order_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "      ON d.product_id = pr.product_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "      ON pr.product_category_name = cat.product_category_name\n",
+        "WHERE\n",
+        "  p.order_status = 'delivered'\n",
+        "  AND cat.product_category_name_english IS NOT NULL"
+      ]
+    },
+    {
+      "name": "0e26c6fb",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "SELECT\n",
+        "  COUNT(DISTINCT p.order_id) AS total_pedidos_entregados\n",
+        "FROM\n",
+        "  `workspace`.`olist_nuevo`.`silver_pedidos` p\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_detalles` d\n",
+        "      ON p.order_id = d.order_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_productos` pr\n",
+        "      ON d.product_id = pr.product_id\n",
+        "    INNER JOIN `workspace`.`olist_nuevo`.`silver_categorias` cat\n",
+        "      ON pr.product_category_name = cat.product_category_name\n",
+        "WHERE\n",
+        "  p.order_status = 'delivered'\n",
+        "  AND cat.product_category_name_english IS NOT NULL"
+      ]
+    },
+    {
+      "name": "7ca9f13a",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "WITH ingresos_estado AS (\n",
+        "    SELECT\n",
+        "        customer_state AS estado,\n",
+        "        SUM(price) AS ingresos_totales\n",
+        "    FROM ef.ventas\n",
+        "    GROUP BY customer_state\n",
+        "),\n",
+        "ranking AS (\n",
+        "    SELECT\n",
+        "        ROW_NUMBER() OVER (\n",
+        "            ORDER BY ingresos_totales DESC\n",
+        "        ) AS posicion,\n",
+        "        estado,\n",
+        "        ingresos_totales\n",
+        "    FROM ingresos_estado\n",
+        ")\n",
+        "SELECT\n",
+        "    CONCAT(\n",
+        "        LPAD(CAST(posicion AS STRING), 2, '0'),\n",
+        "        '. ',\n",
+        "        estado\n",
+        "    ) AS estado,\n",
+        "    ROUND(ingresos_totales, 2) AS ingresos,\n",
+        "    ROUND(\n",
+        "        ingresos_totales * 100.0 / SUM(ingresos_totales) OVER (),\n",
+        "        2\n",
+        "    ) AS porcentaje_ventas\n",
+        "FROM ranking\n",
+        "WHERE posicion <= 10\n",
+        "ORDER BY posicion ASC;"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "e55ab07a",
+      "displayName": "Untitled Page",
+      "layout": [
+        {
+          "widget": {
+            "name": "1775d85b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1f8db19a",
+                  "fields": [
+                    {
+                      "name": "ingresos_totales",
+                      "expression": "`ingresos_totales`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": {
+                  "value": "Visualization 1",
+                  "fields": []
+                },
+                "description": {
+                  "value": "Ingresos Totales",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ingresos_totales",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  },
+                  "rowNumber": 1
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c5c30368",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0a3face8",
+                  "fields": [
+                    {
+                      "name": "ingresos_totales",
+                      "expression": "`ingresos_totales`"
+                    },
+                    {
+                      "name": "nombre_vendedor",
+                      "expression": "`nombre_vendedor`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Ranking de Vendedores (Ingresos)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ingresos_totales",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "nombre_vendedor",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "41ef20f3",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c48a4cc4",
+                  "fields": [
+                    {
+                      "name": "ingresos_totales",
+                      "expression": "`ingresos_totales`"
+                    },
+                    {
+                      "name": "categoria_producto",
+                      "expression": "`categoria_producto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Ranking de Categorías (Ingresos)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ingresos_totales",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "categoria_producto",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "c3260974",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e60641f0",
+                  "fields": [
+                    {
+                      "name": "fecha_mes",
+                      "expression": "`fecha_mes`"
+                    },
+                    {
+                      "name": "ingresos_totales",
+                      "expression": "`ingresos_totales`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Evolución Mensual de Ingresos"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "fecha_mes",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "ingresos_totales",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "d85bcde8",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9ac1d4c1",
+                  "fields": [
+                    {
+                      "name": "periodo",
+                      "expression": "`periodo`"
+                    },
+                    {
+                      "name": "variacion_porcentual",
+                      "expression": "`variacion_porcentual`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Variación Mensual de Ingresos (%)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "area",
+              "encodings": {
+                "x": {
+                  "fieldName": "periodo",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "variacion_porcentual",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 3,
+            "width": 7,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "be098672",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a9268ca9",
+                  "fields": [
+                    {
+                      "name": "latitud",
+                      "expression": "`latitud`"
+                    },
+                    {
+                      "name": "longitud",
+                      "expression": "`longitud`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Distribución Geográfica (Ingresos por Estado)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "symbol-map",
+              "encodings": {
+                "coordinates": {
+                  "latitude": {
+                    "fieldName": "latitud"
+                  },
+                  "longitude": {
+                    "fieldName": "longitud"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 9,
+            "width": 5,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "0c113810",
+            "queries": [
+              {
+                "name": "428ca8063f3049d9b419abba70d47d93",
+                "query": {
+                  "datasetName": "aca17e2e",
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 0,
+              "viz_spec": {
+                "display_name": "Visualization 1",
+                "viz_type": "COUNTER",
+                "serialized_options": "{\"stringThouSep\":\",\",\"counterLabel\":\"Total Vendedores\",\"rowNumber\":1,\"stringDecChar\":\".\",\"tooltipFormat\":\"0,0.000\",\"counterColName\":\"total_vendedores\",\"stringDecimal\":0,\"targetRowNumber\":1}",
+                "query_name": "428ca8063f3049d9b419abba70d47d93"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "3bc7b43c",
+            "queries": [
+              {
+                "name": "61888e151af64030b7615d2d1b4c994a",
+                "query": {
+                  "datasetName": "7e3734fd",
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 0,
+              "viz_spec": {
+                "display_name": "Visualization 8",
+                "viz_type": "COUNTER",
+                "serialized_options": "{\"stringThouSep\":\",\",\"counterLabel\":\"Pedidos Entregados\",\"rowNumber\":1,\"stringDecChar\":\".\",\"tooltipFormat\":\"0,0.000\",\"counterColName\":\"total_pedidos_entregados\",\"stringDecimal\":0,\"targetRowNumber\":1}",
+                "query_name": "61888e151af64030b7615d2d1b4c994a"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "05a48cf0",
+            "queries": [
+              {
+                "name": "61888e151af64030b7615d2d1b4c994a",
+                "query": {
+                  "datasetName": "0e26c6fb",
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 0,
+              "viz_spec": {
+                "display_name": "Visualization 8",
+                "viz_type": "COUNTER",
+                "serialized_options": "{\"stringThouSep\":\",\",\"counterLabel\":\"Pedidos Entregados\",\"rowNumber\":1,\"stringDecChar\":\".\",\"tooltipFormat\":\"0,0.000\",\"counterColName\":\"total_pedidos_entregados\",\"stringDecimal\":0,\"targetRowNumber\":1}",
+                "query_name": "61888e151af64030b7615d2d1b4c994a"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "3b70f5fd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "7ca9f13a",
+                  "fields": [
+                    {
+                      "name": "estado",
+                      "expression": "`estado`"
+                    },
+                    {
+                      "name": "sum(porcentaje_ventas)",
+                      "expression": "SUM(`porcentaje_ventas`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Porcentaje de ventas por estado",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "estado",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(porcentaje_ventas)",
+                  "displayName": "porcentaje_ventas",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "estado",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 16,
+            "width": 8,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
