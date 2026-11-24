@@ -36,4 +36,7 @@ Evaluar el impacto en el rendimiento de una consulta analítica agregada sobre e
 - Es recomendable validar este tipo de índices en consultas analíticas frecuentes antes de aplicarlos de forma masiva, considerando el costo de mantenimiento en escrituras.
 
 ## 7. Evidencias
-- Script SQL y capturas de `Resultados` y `Mensajes` (antes y después del índice) en esta carpeta.
+
+- Script SQL: [`SQLQuery5.sql`](SQLQuery5.sql)
+- Salida de estadísticas (`STATISTICS IO` / `TIME`): [`Mensajes`](Mensajes)
+- Captura de ejecución y resultados: [`Captura resultados.jpg`](Captura%20resultados.jpg)
