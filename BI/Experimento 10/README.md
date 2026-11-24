@@ -1,5 +1,6 @@
 # Experimento 10 - Consulta histórica completa vs. filtro anual en ventas y fletes (BI - SQL Server)
 
+
 ## 1. Objetivo
 Evaluar el comportamiento y el rendimiento de una consulta analítica mensual de ventas y fletes en `OLIST_DATAMART` al ejecutarla sobre todo el periodo histórico frente a filtrarla por un año específico (`WHERE t.anio = 2018`).
 
