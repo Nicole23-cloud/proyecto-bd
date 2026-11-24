@@ -60,7 +60,4 @@ Si la ejecución fue correcta, estos indicadores deben coincidir:
 | Total de pedidos entregados | 95,127 |
 | Total de artículos vendidos | 108,638 |
 
-## Autores
 
-- [Nombre(s) del equipo]
-- [Curso / institución]
