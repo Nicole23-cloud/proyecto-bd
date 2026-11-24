@@ -39,5 +39,5 @@ Evaluar el rendimiento y la consistencia de resultados al calcular el porcentaje
 
 ## 7. Evidencias
 - Script SQL: [`Experimento_09.sql`](Experimento_09.sql)
-- Salida de estadísticas (`STATISTICS IO` / `TIME`): [`Mensajes.txt`](Mensajes9.txt)
-- Captura de ejecución y resultados: [`Captura resultado.jpg`](Captura%20resultado.jpg)
+- Salida de estadísticas (`STATISTICS IO` / `TIME`): [`Mensajes9.txt`](Mensajes9.txt)
+- Captura de ejecución y resultados: [`captura resultado.jpg`](captura%20resultado.jpg)
