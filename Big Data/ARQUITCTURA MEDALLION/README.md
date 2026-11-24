@@ -6,16 +6,16 @@ Pipeline de procesamiento de datos en **Databricks** utilizando **PySpark** y **
 
 ## Estructura del Proyecto
 
-* `01_BRONZE_OLIST` — Ingesta de archivos CSV crudos y persistencia en tablas de la capa **Bronze**[cite: 1].
-* `02_SILVER_OLIST` — Limpieza, estandarización, anonimización/generación de nombres, validación de calidad y guardado de tablas **Silver**[cite: 2].
-* `03_GOLD_OLIST` (o notebook Gold correspondiente) — Ejecución de la capa Silver (`%run ./02_SILVER_OLIST`), registro de vistas temporales y creación de la vista analítica **`gold_ventas`**[cite: 3].
+* [`01_BRONZE_OLIST 2026-11-22 17_49_54 (1).ipynb`](./01_BRONZE_OLIST%202026-11-22%2017_49_54%20(1).ipynb) — Ingesta de archivos CSV crudos y persistencia en tablas de la capa **Bronze**[cite: 1, 4].
+* [`02_SILVER_OLIST (1).ipynb`](./02_SILVER_OLIST%20(1).ipynb) — Limpieza, estandarización, anonimización/generación de nombres, validación de calidad y guardado de tablas **Silver**[cite: 2, 4].
+* [`03_GOLD_OLIST (1).ipynb`](./03_GOLD_OLIST%20(1).ipynb) — Ejecución de la capa Silver (`%run ./02_SILVER_OLIST`), registro de vistas temporales y creación de la vista analítica **`gold_ventas`**[cite: 3, 4].
 
 ---
 
 ## Flujo de Datos (Arquitectura Medallion)
 
-### 1. Capa Bronze (`01_BRONZE_OLIST`)
-Lee los archivos CSV desde el volumen `/Volumes/workspace/olist_nuevo/olist/Archivos.csv/Olist_CSV/` con `header=True`, `inferSchema=True` y separador `,`[cite: 1]:
+### 1. Capa Bronze ([`01_BRONZE_OLIST 2026-11-22 17_49_54 (1).ipynb`](./01_BRONZE_OLIST%202026-11-22%2017_49_54%20(1).ipynb))
+Lee los archivos CSV desde el volumen `/Volumes/workspace/olist_nuevo/olist/Archivos.csv/Olist_CSV/` con `header=True`, `inferSchema=True` y separador `,`[cite: 1, 4]:
 
 * `olist_customers_dataset.csv` → `olist_nuevo.bronze_clientes`[cite: 1]
 * `olist_orders_dataset.csv` → `olist_nuevo.bronze_pedidos`[cite: 1]
@@ -26,8 +26,8 @@ Lee los archivos CSV desde el volumen `/Volumes/workspace/olist_nuevo/olist/Arch
 
 ---
 
-### 2. Capa Silver (`02_SILVER_OLIST`)
-Aplica reglas de limpieza, tipado y enriquecimiento antes de guardar en `workspace.olist_nuevo.silver_*`[cite: 2]:
+### 2. Capa Silver ([`02_SILVER_OLIST (1).ipynb`](./02_SILVER_OLIST%20(1).ipynb))
+Aplica reglas de limpieza, tipado y enriquecimiento antes de guardar en `workspace.olist_nuevo.silver_*`[cite: 2, 4]:
 
 * **Generación determinista de nombres brasileños:** Asigna `nombre_cliente` (por `customer_unique_id`) y `nombre_vendedor` (por `seller_id`) combinando listas de nombres y apellidos mediante `xxhash64` y `pmod`[cite: 2].
 * **Clientes (`silver_clientes`):** Elimina duplicados por `customer_id`, descarta nulos/vacíos en claves, normaliza `customer_city` a minúsculas y `customer_state` a mayúsculas con `trim`, y une `nombre_cliente`[cite: 2].
@@ -40,8 +40,8 @@ Aplica reglas de limpieza, tipado y enriquecimiento antes de guardar en `workspa
 
 ---
 
-### 3. Capa Gold (Vista `gold_ventas`)
-* Ejecuta `%run ./02_SILVER_OLIST` y expone los DataFrames Silver como vistas temporales[cite: 3].
+### 3. Capa Gold ([`03_GOLD_OLIST (1).ipynb`](./03_GOLD_OLIST%20(1).ipynb))
+* Ejecuta `%run ./02_SILVER_OLIST` y expone los DataFrames Silver como vistas temporales[cite: 3, 4].
 * Construye la vista temporal `gold_ventas` mediante `INNER JOIN` entre `silver_detalles`, `silver_pedidos`, `silver_clientes`, `silver_productos`, `silver_vendedores` y `silver_categorias`, filtrando registros con `product_category_name_english IS NOT NULL`[cite: 3].
 * **Columnas expuestas:** `order_id`, `order_item_id`, datos del cliente (`customer_id`, `customer_unique_id`, `nombre_cliente`, `customer_city`, `customer_state`), pedido (`order_status`, `order_purchase_timestamp`), producto (`product_id`, `product_category_name`, `product_category_name_english`), vendedor (`seller_id`, `nombre_vendedor`, `seller_city`, `seller_state`) y métricas (`price`, `freight_value`)[cite: 3].
 
@@ -52,6 +52,6 @@ Aplica reglas de limpieza, tipado y enriquecimiento antes de guardar en `workspa
 1. Subir los notebooks a un workspace de **Databricks** (con acceso a Unity Catalog / volúmenes configurados)[cite: 1, 2, 3].
 2. Asegurar que los archivos CSV de origen existan en `/Volumes/workspace/olist_nuevo/olist/Archivos.csv/Olist_CSV/`[cite: 1].
 3. Ejecutar los notebooks en orden[cite: 1, 2, 3]:
-   1. `01_BRONZE_OLIST`[cite: 1]
-   2. `02_SILVER_OLIST`[cite: 2]
-   3. Notebook **Gold** (que invoca `%run ./02_SILVER_OLIST` y crea `gold_ventas`)[cite: 3]
+   1. [`01_BRONZE_OLIST 2026-11-22 17_49_54 (1).ipynb`](./01_BRONZE_OLIST%202026-11-22%2017_49_54%20(1).ipynb)[cite: 1, 4]
+   2. [`02_SILVER_OLIST (1).ipynb`](./02_SILVER_OLIST%20(1).ipynb)[cite: 2, 4]
+   3. [`03_GOLD_OLIST (1).ipynb`](./03_GOLD_OLIST%20(1).ipynb)[cite: 3, 4]
