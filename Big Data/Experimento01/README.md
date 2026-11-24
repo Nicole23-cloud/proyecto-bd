@@ -31,7 +31,6 @@ Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de 
    - `filtro_periodo`: conteo y ventas filtrando `anio = 2018 AND mes = 1`.
 5. **Almacenamiento.** Se consultó `DESCRIBE DETAIL` de cada tabla para obtener número de archivos y tamaño.
 
-![Figura 1. Código de replicación y carga](Evidencias/EXP-01_codigo_replicacion.png)
 
 *Figura 1. Código de replicación y carga de tablas.*
 
@@ -45,7 +44,7 @@ Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de 
 | x10 | 4.4 | 5.2 |
 | x50 | 8.1 | 8.0 |
 
-![Figura 2. Tiempos de carga](Evidencias/EXP-02_tiempos_carga.png)
+
 
 *Figura 2. Tiempos de carga por factor y tipo de tabla.*
 
@@ -58,7 +57,7 @@ Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de 
 | ventas_por_estado | 0.62 | 0.68 | 0.74 | 0.78 | 1.23 | 1.14 |
 | ventas_por_mes | 0.64 | 0.67 | 0.57 | 0.62 | 0.64 | 0.62 |
 
-![Figura 3. Tiempos de consulta](Evidencias/EXP-03_consultas.png)
+
 
 *Figura 3. Mediana de tiempos de consulta por tabla.*
 
@@ -73,7 +72,7 @@ Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de 
 | exp_ventas_x50 | 1 | 42.4 | - |
 | exp_ventas_x50_part | 23 | 24.6 | anio, mes |
 
-![Figura 4. Detalle de almacenamiento](Evidencias/EXP-04_describe_detail.png)
+
 
 *Figura 4. Resultado de `DESCRIBE DETAIL` para las seis tablas.*
 
@@ -97,4 +96,4 @@ Evaluar cómo se comporta la tabla de ventas de Olist al aumentar el volumen de 
 ## 7. Evidencias
 
 - Notebook: [`Experi01.ipynb`](Experi01.ipynb)
-- Capturas: carpeta [`Evidencias/`](Evidencias/)
+
