@@ -78,7 +78,7 @@ Los datos deben quedar en esta ruta, que es la que lee el notebook Bronze:
 2. Importar el notebook de la capa **Silver** y ejecutarlo con **Run All**.
 3. Importar el notebook de la capa **Gold** y ejecutarlo con **Run All**. Este notebook vuelve a ejecutar primero la lógica de Silver para que los datos estén actualizados.
 
-> Los pasos detallados, con capturas, están en `Procedimiento_Reproducible.docx`.
+> Los pasos detallados, con capturas, están en `Procedimiento_Reproducible_Big_Data.pdf`.
 
 ## Indicadores (KPI) generados en Gold
 
